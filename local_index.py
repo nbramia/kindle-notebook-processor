@@ -142,10 +142,11 @@ def extract_pdf_url(html_body):
 def get_or_create_folder(drive_service, folder_name, parent_id=None):
     """Get or create a folder in Google Drive, optionally within a parent folder."""
     try:
-        # Build query
-        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        # Build query to find existing folder
+        query = f"mimeType='application/vnd.google-apps.folder' and trashed=false"
         if parent_id:
             query += f" and '{parent_id}' in parents"
+        query += f" and name='{folder_name}'"
             
         response = drive_service.files().list(
             q=query,
@@ -153,21 +154,23 @@ def get_or_create_folder(drive_service, folder_name, parent_id=None):
             fields='files(id, name)'
         ).execute()
         
+        # If folder exists, return its ID
         if response.get('files'):
             return response['files'][0]['id']
-        else:
-            file_metadata = {
-                'name': folder_name,
-                'mimeType': 'application/vnd.google-apps.folder'
-            }
-            if parent_id:
-                file_metadata['parents'] = [parent_id]
-                
-            file = drive_service.files().create(
-                body=file_metadata,
-                fields='id'
-            ).execute()
-            return file.get('id')
+            
+        # If folder doesn't exist, create it
+        file_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        if parent_id:
+            file_metadata['parents'] = [parent_id]
+            
+        file = drive_service.files().create(
+            body=file_metadata,
+            fields='id'
+        ).execute()
+        return file.get('id')
             
     except Exception as e:
         raise Exception(f"Error handling folder: {str(e)}")
@@ -182,32 +185,38 @@ def upload_to_drive(drive_service, file_content, filename):
         old_folder_id = get_or_create_folder(drive_service, "Old", parent_id=main_folder_id)
         
         # Check if file already exists in main folder
-        response = drive_service.files().list(
-            q=f"name='{filename}.pdf' and '{main_folder_id}' in parents and trashed=false",
+        existing_file_query = f"name='{filename}.pdf' and '{main_folder_id}' in parents and trashed=false"
+        existing_files = drive_service.files().list(
+            q=existing_file_query,
             spaces='drive',
             fields='files(id, name)'
-        ).execute()
+        ).execute().get('files', [])
         
         # If file exists, move it to Old folder with timestamp
-        if response.get('files'):
-            existing_file = response['files'][0]
-            # Get EST timestamp
-            est_time = datetime.now().astimezone(timezone('US/Eastern'))
-            timestamp = est_time.strftime('%Y%m%d_%H%M%S')
-            new_name = f"{filename}_{timestamp}.pdf"
+        if existing_files:
+            try:
+                # Try to get EST timestamp
+                est_time = datetime.now().astimezone(timezone('US/Eastern'))
+            except:
+                # Fallback to UTC if timezone conversion fails
+                est_time = datetime.utcnow()
             
-            # Move and rename existing file
-            drive_service.files().update(
-                fileId=existing_file['id'],
-                body={
-                    'name': new_name,
-                    'parents': [old_folder_id]
-                },
-                removeParents=[main_folder_id],
-                fields='id, name'
-            ).execute()
+            timestamp = est_time.strftime('%Y%m%d_%H%M%S')
+            
+            for existing_file in existing_files:
+                new_name = f"{filename}_{timestamp}.pdf"
+                print(f"Moving existing file {existing_file['name']} to Old folder as {new_name}")
+                
+                # Update file metadata (rename and move)
+                drive_service.files().update(
+                    fileId=existing_file['id'],
+                    addParents=old_folder_id,
+                    removeParents=main_folder_id,
+                    body={'name': new_name}
+                ).execute()
         
         # Upload new file to main folder
+        print(f"Uploading new file: {filename}.pdf")
         file_metadata = {
             'name': f'{filename}.pdf',
             'parents': [main_folder_id]
@@ -224,9 +233,11 @@ def upload_to_drive(drive_service, file_content, filename):
             fields='id'
         ).execute()
         
+        print(f"Successfully uploaded new file with ID: {file.get('id')}")
         return file.get('id')
         
     except Exception as e:
+        print(f"Error in upload_to_drive: {str(e)}")
         raise Exception(f"Error uploading to Drive: {str(e)}")
     
 def process_kindle_emails():
