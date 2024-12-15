@@ -1,0 +1,5 @@
+# requirements.txt
+google-api-python-client==2.88.0
+google-auth==2.22.0
+beautifulsoup4==4.12.2
+requests==2.31.0
