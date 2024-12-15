@@ -243,7 +243,11 @@ def upload_to_drive(drive_service, file_content, filename, file_type='pdf'):
 def process_kindle_emails():
     """Process all unread Kindle emails."""
     try:
+        start_time = datetime.now()
+        print(f"Starting process at {start_time}")
+        
         gmail_service, drive_service = get_services()
+        print(f"Services initialized after {datetime.now() - start_time}")
         
         messages = find_kindle_emails(gmail_service)
         if not messages:
@@ -256,36 +260,40 @@ def process_kindle_emails():
                 })
             }
         
+        print(f"Found {len(messages)} messages after {datetime.now() - start_time}")
+        
         processed_files = []
-        processed_filenames = set()  # Keep track of what we've already handled
+        processed_filenames = set()
         
         for message in messages:
             try:
                 msg_id = message['id']
+                print(f"Processing message {msg_id} at {datetime.now() - start_time}")
                 
-                # Extract filename first to check if we've already handled it
                 filename, html_body = extract_email_data(gmail_service, msg_id)
                 
                 if filename in processed_filenames:
                     print(f"Skipping duplicate filename: {filename}")
                     continue
                     
-                processed_filenames.add(filename)  # Add to our tracking set
-                
-                # Now proceed with normal processing
+                processed_filenames.add(filename)
                 mark_as_read(gmail_service, msg_id)
                 pdf_url, txt_url = extract_file_urls(html_body)
                 
-                # Download and upload PDF
+                print(f"Downloading PDF for {filename} at {datetime.now() - start_time}")
                 response = requests.get(pdf_url, timeout=30)
                 response.raise_for_status()
+                
+                print(f"Uploading PDF to Drive at {datetime.now() - start_time}")
                 pdf_id = upload_to_drive(drive_service, response.content, filename, 'pdf')
                 
-                # If text file is available, download and upload it
                 txt_id = None
                 if txt_url:
+                    print(f"Downloading TXT for {filename} at {datetime.now() - start_time}")
                     response = requests.get(txt_url, timeout=30)
                     response.raise_for_status()
+                    
+                    print(f"Uploading TXT to Drive at {datetime.now() - start_time}")
                     txt_id = upload_to_drive(drive_service, response.content, filename, 'txt')
                 
                 processed_files.append({
@@ -297,10 +305,13 @@ def process_kindle_emails():
                 
             except Exception as e:
                 processed_files.append({
-                    'message_id': msg_id,
+                    'message_id': message.get('id', 'unknown'),
                     'error': str(e),
                     'status': 'error'
                 })
+        
+        total_time = datetime.now() - start_time
+        print(f"Completed processing in {total_time}")
         
         return {
             'statusCode': 200,
@@ -308,6 +319,7 @@ def process_kindle_emails():
                 'message': 'Processing complete',
                 'status': 'success',
                 'files_processed': processed_files,
+                'processing_time': str(total_time),
                 'timestamp': str(datetime.now())
             })
         }
