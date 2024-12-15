@@ -14,6 +14,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 
+from openai import OpenAI
+
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.modify',
@@ -98,9 +100,11 @@ def download_file_content(drive_service, file_id):
 
 def call_openai_api(text):
     """Call OpenAI with the text to get summary and action items."""
-    openai.api_key = os.environ.get("OPENAI_API_KEY")
-    if not openai.api_key:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable not set.")
+    
+    client = OpenAI(api_key=api_key)
 
     prompt = (
         "You are a helpful assistant. Given the following text, please:\n"
@@ -115,11 +119,17 @@ def call_openai_api(text):
         "Text to process:\n" + text
     )
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4o", 
+    response = client.chat.completions.create(
+        model="gpt-4o",  # or "gpt-4-turbo-preview" for the latest version
         messages=[
-            {"role": "system", "content": "You are a helpful assistant who summarizes OCR'd handwritten notes, primarily from meetings. Sometimes there are typos from the OCR, and they're generally in shorthand. You do your best."},
-            {"role": "user", "content": prompt}
+            {
+                "role": "system", 
+                "content": "You are a helpful assistant who summarizes OCR'd handwritten notes, primarily from meetings. Sometimes there are typos from the OCR, and they're generally in shorthand. You do your best."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
         ],
         max_tokens=10000,
         temperature=0.5
