@@ -7,11 +7,26 @@ SCOPES = [
 ]
 
 def generate_token():
-    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-    creds = flow.run_local_server(port=8099)
+    """Generate token with offline access."""
+    flow = InstalledAppFlow.from_client_secrets_file(
+        'credentials.json', 
+        SCOPES
+    )
+    
+    # Run the OAuth flow with offline access
+    creds = flow.run_local_server(
+        port=8099,
+        access_type='offline',
+        prompt='consent'
+    )
+    
+    # Save the credentials
     with open('token.json', 'w') as token:
         token.write(creds.to_json())
-    print("Token generated successfully!")
+    
+    print("\nYour GMAIL_TOKEN for Vercel:\n")
+    print(creds.to_json())
+    print("\nToken also saved to token.json")
 
 if __name__ == "__main__":
     generate_token()

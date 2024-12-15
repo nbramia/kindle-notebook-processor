@@ -13,6 +13,7 @@ from datetime import datetime
 from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
 from pytz import timezone
+from google.auth.transport.requests import Request
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -27,24 +28,24 @@ def get_services():
         if not token_json:
             raise ValueError("GMAIL_TOKEN environment variable not set")
         
-        try:
-            creds_dict = json.loads(token_json)
-        except json.JSONDecodeError:
-            raise ValueError("GMAIL_TOKEN environment variable contains invalid JSON")
-            
+        creds_dict = json.loads(token_json)
         creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
+
+        # Check if credentials are expired and can be refreshed
+        if creds and creds.expired and creds.refresh_token:
+            # Refresh the token
+            creds.refresh(Request())
         
+        # Now creds should be valid if refresh was successful
         if not creds or not creds.valid:
-            raise ValueError(
-                "Invalid credentials. Generate new token.json locally and update GMAIL_TOKEN environment variable"
-            )
-            
+            raise ValueError("Invalid credentials. Could not validate or refresh token.")
+
         gmail_service = build('gmail', 'v1', credentials=creds)
         drive_service = build('drive', 'v3', credentials=creds)
         return gmail_service, drive_service
     except Exception as e:
         raise Exception(f"Failed to initialize services: {str(e)}")
-
+        
 def find_kindle_emails(service):
     """Find all unread Kindle emails matching our pattern."""
     try:
