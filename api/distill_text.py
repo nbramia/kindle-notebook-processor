@@ -221,32 +221,45 @@ def process_text_files():
                 })
             }
 
-        processed = []
-        for f in txt_files:
-            file_id = f['id']
-            filename = f['name']
-            # Download content
-            text_content = download_file_content(drive_service, file_id)
-            # Call OpenAI
-            md_content = call_openai_api(text_content)
-            # Derive a base filename for the md file
-            base_name = re.sub(r'\.txt$', '', filename, flags=re.IGNORECASE)
-            # Upload MD file
-            md_file_id = upload_markdown(drive_service, base_name, md_content)
-            # Move original txt to Old
-            move_original_file(drive_service, file_id, filename, main_folder_id)
-            processed.append({
-                'original_txt': filename,
-                'md_file_id': md_file_id,
-                'status': 'success'
-            })
+        # Process the first/next file
+        f = txt_files[0]
+        file_id = f['id']
+        filename = f['name']
+        
+        text_content = download_file_content(drive_service, file_id)
+        md_content = call_openai_api(text_content)
+        base_name = re.sub(r'\.txt$', '', filename, flags=re.IGNORECASE)
+        md_file_id = upload_markdown(drive_service, base_name, md_content)
+        move_original_file(drive_service, file_id, filename, main_folder_id)
+
+        remaining = len(txt_files) - 1
+        if remaining > 0:
+            return {
+                'statusCode': 307,  # Temporary Redirect - indicates more work to do, in case there are more files to process
+                'body': json.dumps({
+                    'message': f'More files to process: {remaining} remaining',
+                    'status': 'pending',
+                    'processed': {
+                        'original_txt': filename,
+                        'md_file_id': md_file_id,
+                        'status': 'success'
+                    },
+                    'remaining_files': remaining,
+                    'timestamp': str(datetime.now())
+                })
+            }
 
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'Text files processed successfully',
+                'message': 'All text files processed',
                 'status': 'success',
-                'processed': processed,
+                'processed': {
+                    'original_txt': filename,
+                    'md_file_id': md_file_id,
+                    'status': 'success'
+                },
+                'remaining_files': 0,
                 'timestamp': str(datetime.now())
             })
         }
