@@ -138,14 +138,15 @@ def call_openai_api(text):
     return response.choices[0].message.content.strip()
 
 def upload_markdown(drive_service, filename, content):
-    """Upload the markdown file to the main folder, handle duplicates as in the original code."""
+    """Upload the markdown file and move any matching PDF to Old folder."""
     main_folder_id = get_or_create_folder(drive_service, "Kindle Notebooks")
     old_folder_id = get_or_create_folder(drive_service, "Old", parent_id=main_folder_id)
 
     extension = '.md'
     full_filename = f'{filename}{extension}'
+    pdf_filename = f'{filename}.pdf'
 
-    # Check if file already exists
+    # Check if markdown file already exists
     existing_file_query = f"name='{full_filename}' and '{main_folder_id}' in parents and trashed=false"
     existing_files = drive_service.files().list(
         q=existing_file_query,
@@ -153,13 +154,22 @@ def upload_markdown(drive_service, filename, content):
         fields='files(id, name)'
     ).execute().get('files', [])
 
-    if existing_files:
+    # Check for matching PDF file
+    pdf_query = f"name='{pdf_filename}' and '{main_folder_id}' in parents and trashed=false"
+    pdf_files = drive_service.files().list(
+        q=pdf_query,
+        spaces='drive',
+        fields='files(id, name)'
+    ).execute().get('files', [])
+
+    if existing_files or pdf_files:
         try:
             est_time = datetime.now().astimezone(timezone('US/Eastern'))
         except:
             est_time = datetime.utcnow()
         timestamp = est_time.strftime('%Y%m%d_%H%M%S')
 
+        # Move existing markdown files
         for existing_file in existing_files:
             new_name = f"{filename}_{timestamp}{extension}"
             drive_service.files().update(
@@ -169,6 +179,17 @@ def upload_markdown(drive_service, filename, content):
                 body={'name': new_name}
             ).execute()
 
+        # Move matching PDF files
+        for pdf_file in pdf_files:
+            new_pdf_name = f"{filename}_{timestamp}.pdf"
+            drive_service.files().update(
+                fileId=pdf_file['id'],
+                addParents=old_folder_id,
+                removeParents=main_folder_id,
+                body={'name': new_pdf_name}
+            ).execute()
+
+    # Upload new markdown file
     file_metadata = {
         'name': full_filename,
         'parents': [main_folder_id]
