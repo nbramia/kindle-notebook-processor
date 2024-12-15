@@ -357,11 +357,11 @@ if __name__ == "__main__":
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
+      "src": "/api/distill_text",
+      "dest": "/api/distill_text.py"
     },
     {
-      "src": "/(.*)",
+      "src": "/api/(.*)",
       "dest": "/api/index.py"
     }
   ]
