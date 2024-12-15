@@ -8,6 +8,8 @@ from urllib.parse import unquote
 from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
+from http.server import BaseHTTPRequestHandler
+from datetime import datetime
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
@@ -138,51 +140,57 @@ def download_pdf(url, filename):
         raise Exception(f"Error downloading PDF: {str(e)}")
 
 def handle_request(event, context):
-    """Main handler for Vercel serverless function."""
     try:
-        # Initialize Gmail service
         service = get_gmail_service()
-        
-        # Find Kindle email
         msg_id = find_kindle_email(service)
+        
         if not msg_id:
             return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'No new Kindle emails found in the last 24 hours',
-                    'status': 'no_email',
-                    'timestamp': str(datetime.now())
+                "statusCode": 200,
+                "body": json.dumps({
+                    "message": "No new Kindle emails found",
+                    "timestamp": str(datetime.now())
                 })
             }
-        
-        # Process email and download PDF
+            
         filename, html_body = extract_email_data(service, msg_id)
         pdf_url = extract_pdf_url(html_body)
         pdf_path = download_pdf(pdf_url, filename)
         
-        # Get file size to confirm download
-        file_size = os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
-        
         return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Successfully processed Kindle email',
-                'status': 'success',
-                'details': {
-                    'filename': filename,
-                    'pdf_path': pdf_path,
-                    'file_size': f"{file_size / 1024:.2f} KB",
-                    'timestamp': str(datetime.now())
-                }
+            "statusCode": 200,
+            "body": json.dumps({
+                "message": "Success",
+                "filename": filename,
+                "pdf_path": pdf_path,
+                "timestamp": str(datetime.now())
             })
         }
-        
     except Exception as e:
         return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'message': str(e),
-                'status': 'error',
-                'timestamp': str(datetime.now())
+            "statusCode": 500,
+            "body": json.dumps({
+                "error": str(e),
+                "timestamp": str(datetime.now())
             })
         }
+
+def lambda_handler(event, context):
+    return handle_request(event, context)
+
+# Vercel handler
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        result = handle_request(None, None)
+        
+        self.send_response(result.get("statusCode", 500))
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        
+        response_body = result.get("body", json.dumps({"error": "Unknown error"}))
+        self.wfile.write(response_body.encode())
+        return
+
+# For local testing
+if __name__ == "__main__":
+    print(json.dumps(handle_request(None, None), indent=2))
