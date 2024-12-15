@@ -6,3 +6,4 @@ google-auth-oauthlib==1.0.0
 beautifulsoup4==4.12.2
 requests==2.31.0
 pytz==2024.1
+openai>=1.50.0
