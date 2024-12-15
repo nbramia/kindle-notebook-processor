@@ -108,14 +108,14 @@ def call_openai_api(text):
 
     prompt = (
         "You are a helpful assistant. Given the following text, please:\n"
-        "1. Extract any action items or to-dos.\n"
+        "1. Extract any action items or to-dos. Only include items that are specifically called out directly as followups - don't include items that are only indirectly implied, and don't try too hard to infer.\n"
         "2. Summarize the text. Make it concise and actionable. Ensure you do not speculate. If there isn't enough information for you to understand what something means, don't guess.\n"
         "3. Include the date in the summary, if found in the notes.\n"
         "Output the result in Markdown format with the following sections:\n"
         "### Summary\n\n"
         "### Action Items\n\n"
         "### Notes\n\n"
-        "The 'Notes' section should be exactly equivalent to ALL of the original text you were sent to process.\n\n"
+        "The 'Notes' section should be exactly equivalent to ALL of the original text you were sent to process. However, you may try to correct errors in OCR - don't get creative, but if you see a word that almost certainly should have been something else given the context, you maycorrect it.\n\n"
         "Text to process:\n" + text
     )
 
