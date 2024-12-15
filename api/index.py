@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler
 from datetime import datetime
 from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
+from pytz import timezone
 
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -141,11 +142,16 @@ def extract_pdf_url(html_body):
     
     return pdf_url
 
-def get_or_create_folder(drive_service, folder_name="Kindle Notebooks"):
-    """Get or create a folder in Google Drive."""
+def get_or_create_folder(drive_service, folder_name, parent_id=None):
+    """Get or create a folder in Google Drive, optionally within a parent folder."""
     try:
+        # Build query
+        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        if parent_id:
+            query += f" and '{parent_id}' in parents"
+            
         response = drive_service.files().list(
-            q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            q=query,
             spaces='drive',
             fields='files(id, name)'
         ).execute()
@@ -157,6 +163,9 @@ def get_or_create_folder(drive_service, folder_name="Kindle Notebooks"):
                 'name': folder_name,
                 'mimeType': 'application/vnd.google-apps.folder'
             }
+            if parent_id:
+                file_metadata['parents'] = [parent_id]
+                
             file = drive_service.files().create(
                 body=file_metadata,
                 fields='id'
@@ -167,19 +176,44 @@ def get_or_create_folder(drive_service, folder_name="Kindle Notebooks"):
         raise Exception(f"Error handling folder: {str(e)}")
 
 def upload_to_drive(drive_service, file_content, filename):
-    """Upload PDF to Google Drive in specific folder, overwriting if exists."""
+    """Upload PDF to Google Drive, moving existing files to an 'Old' subfolder with timestamp."""
     try:
-        folder_id = get_or_create_folder(drive_service)
+        # Get or create main folder
+        main_folder_id = get_or_create_folder(drive_service, "Kindle Notebooks")
         
+        # Get or create 'Old' subfolder
+        old_folder_id = get_or_create_folder(drive_service, "Old", parent_id=main_folder_id)
+        
+        # Check if file already exists in main folder
         response = drive_service.files().list(
-            q=f"name='{filename}.pdf' and '{folder_id}' in parents and trashed=false",
+            q=f"name='{filename}.pdf' and '{main_folder_id}' in parents and trashed=false",
             spaces='drive',
             fields='files(id, name)'
         ).execute()
         
+        # If file exists, move it to Old folder with timestamp
+        if response.get('files'):
+            existing_file = response['files'][0]
+            # Get EST timestamp
+            est_time = datetime.now().astimezone(timezone('US/Eastern'))
+            timestamp = est_time.strftime('%Y%m%d_%H%M%S')
+            new_name = f"{filename}_{timestamp}.pdf"
+            
+            # Move and rename existing file
+            drive_service.files().update(
+                fileId=existing_file['id'],
+                body={
+                    'name': new_name,
+                    'parents': [old_folder_id]
+                },
+                removeParents=[main_folder_id],
+                fields='id, name'
+            ).execute()
+        
+        # Upload new file to main folder
         file_metadata = {
             'name': f'{filename}.pdf',
-            'parents': [folder_id]
+            'parents': [main_folder_id]
         }
         media = MediaIoBaseUpload(
             BytesIO(file_content),
@@ -187,20 +221,11 @@ def upload_to_drive(drive_service, file_content, filename):
             resumable=True
         )
         
-        if response.get('files'):
-            file_id = response['files'][0]['id']
-            file_metadata.pop('parents', None)
-            file = drive_service.files().update(
-                fileId=file_id,
-                body=file_metadata,
-                media_body=media
-            ).execute()
-        else:
-            file = drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id'
-            ).execute()
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
         
         return file.get('id')
         
