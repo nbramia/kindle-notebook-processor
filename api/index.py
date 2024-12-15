@@ -149,8 +149,9 @@ def handle_request(event, context):
             return {
                 'statusCode': 200,
                 'body': json.dumps({
-                    'message': 'No new Kindle emails found',
-                    'status': 'no_email'
+                    'message': 'No new Kindle emails found in the last 24 hours',
+                    'status': 'no_email',
+                    'timestamp': str(datetime.now())
                 })
             }
         
@@ -159,13 +160,20 @@ def handle_request(event, context):
         pdf_url = extract_pdf_url(html_body)
         pdf_path = download_pdf(pdf_url, filename)
         
+        # Get file size to confirm download
+        file_size = os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
+        
         return {
             'statusCode': 200,
             'body': json.dumps({
                 'message': 'Successfully processed Kindle email',
                 'status': 'success',
-                'filename': filename,
-                'pdf_path': pdf_path
+                'details': {
+                    'filename': filename,
+                    'pdf_path': pdf_path,
+                    'file_size': f"{file_size / 1024:.2f} KB",
+                    'timestamp': str(datetime.now())
+                }
             })
         }
         
@@ -174,6 +182,7 @@ def handle_request(event, context):
             'statusCode': 500,
             'body': json.dumps({
                 'message': str(e),
-                'status': 'error'
+                'status': 'error',
+                'timestamp': str(datetime.now())
             })
         }

@@ -5,3 +5,4 @@ __pycache__/
 venv/
 token.json
 credentials.json
+gmail_token_generator.py
