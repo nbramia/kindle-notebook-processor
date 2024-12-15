@@ -257,11 +257,23 @@ def process_kindle_emails():
             }
         
         processed_files = []
+        processed_filenames = set()  # Keep track of what we've already handled
         
         for message in messages:
             try:
                 msg_id = message['id']
+                
+                # Extract filename first to check if we've already handled it
                 filename, html_body = extract_email_data(gmail_service, msg_id)
+                
+                if filename in processed_filenames:
+                    print(f"Skipping duplicate filename: {filename}")
+                    continue
+                    
+                processed_filenames.add(filename)  # Add to our tracking set
+                
+                # Now proceed with normal processing
+                mark_as_read(gmail_service, msg_id)
                 pdf_url, txt_url = extract_file_urls(html_body)
                 
                 # Download and upload PDF
@@ -275,8 +287,6 @@ def process_kindle_emails():
                     response = requests.get(txt_url, timeout=30)
                     response.raise_for_status()
                     txt_id = upload_to_drive(drive_service, response.content, filename, 'txt')
-                
-                mark_as_read(gmail_service, msg_id)
                 
                 processed_files.append({
                     'filename': filename,
