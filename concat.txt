@@ -325,4 +325,29 @@ class handler(BaseHTTPRequestHandler):
         return
 
 if __name__ == "__main__":
-    print(json.dumps(process_kindle_emails(), indent=2))
+    print(json.dumps(process_kindle_emails(), indent=2)){
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.py"
+    }
+  ]
+}# requirements.txt
+google-api-python-client==2.91.0
+google-auth==2.22.0
+google-auth-httplib2==0.1.0
+google-auth-oauthlib==1.0.0
+beautifulsoup4==4.12.2
+requests==2.31.0
+pytz==2024.1
