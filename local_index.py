@@ -1,4 +1,3 @@
-# api/index.py
 import os
 import json
 import re
@@ -8,36 +7,32 @@ from urllib.parse import unquote
 from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from http.server import BaseHTTPRequestHandler
-from datetime import datetime
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
+from datetime import datetime
 
+# Add Google Drive scope
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/drive.file'
+    'https://www.googleapis.com/auth/gmail.modify',  # For marking emails as read
+    'https://www.googleapis.com/auth/drive.file'     # For Google Drive access
 ]
 
 def get_services():
-    """Initialize Gmail and Drive services using environment credentials."""
+    """Initialize Gmail and Drive services using local token."""
     try:
-        token_json = os.environ.get('GMAIL_TOKEN')
-        if not token_json:
-            raise ValueError("GMAIL_TOKEN environment variable not set")
-        
-        try:
-            creds_dict = json.loads(token_json)
-        except json.JSONDecodeError:
-            raise ValueError("GMAIL_TOKEN environment variable contains invalid JSON")
-            
-        creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
+        creds = None
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
         
         if not creds or not creds.valid:
-            raise ValueError(
-                "Invalid credentials. Generate new token.json locally and update GMAIL_TOKEN environment variable"
-            )
-            
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                raise ValueError("Invalid token. Please regenerate token.json with updated scopes")
+        
         gmail_service = build('gmail', 'v1', credentials=creds)
         drive_service = build('drive', 'v3', credentials=creds)
         return gmail_service, drive_service
@@ -71,11 +66,13 @@ def extract_email_data(service, msg_id):
         email_data = service.users().messages().get(
             userId='me', id=msg_id, format='full').execute()
         
+        # Get subject and extract filename
         headers = email_data['payload']['headers']
         subject = next(h['value'] for h in headers if h['name'].lower() == 'subject')
         filename_match = re.search(r'"([^"]+)"', subject)
         filename = filename_match.group(1) if filename_match else "kindle_download"
         
+        # Extract HTML body
         html_body = None
         parts = email_data.get('payload', {}).get('parts', [])
         for part in parts:
@@ -144,6 +141,7 @@ def extract_pdf_url(html_body):
 def get_or_create_folder(drive_service, folder_name="Kindle Notebooks"):
     """Get or create a folder in Google Drive."""
     try:
+        # Search for existing folder
         response = drive_service.files().list(
             q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
             spaces='drive',
@@ -151,8 +149,10 @@ def get_or_create_folder(drive_service, folder_name="Kindle Notebooks"):
         ).execute()
         
         if response.get('files'):
+            # Folder exists, return its ID
             return response['files'][0]['id']
         else:
+            # Create folder
             file_metadata = {
                 'name': folder_name,
                 'mimeType': 'application/vnd.google-apps.folder'
@@ -169,17 +169,20 @@ def get_or_create_folder(drive_service, folder_name="Kindle Notebooks"):
 def upload_to_drive(drive_service, file_content, filename):
     """Upload PDF to Google Drive in specific folder, overwriting if exists."""
     try:
+        # Get or create the folder
         folder_id = get_or_create_folder(drive_service)
         
+        # Search for existing file in the folder
         response = drive_service.files().list(
             q=f"name='{filename}.pdf' and '{folder_id}' in parents and trashed=false",
             spaces='drive',
             fields='files(id, name)'
         ).execute()
         
+        # Prepare file metadata and media
         file_metadata = {
             'name': f'{filename}.pdf',
-            'parents': [folder_id]
+            'parents': [folder_id]  # This puts the file in our folder
         }
         media = MediaIoBaseUpload(
             BytesIO(file_content),
@@ -188,7 +191,9 @@ def upload_to_drive(drive_service, file_content, filename):
         )
         
         if response.get('files'):
+            # Update existing file
             file_id = response['files'][0]['id']
+            # Remove the parents field for update
             file_metadata.pop('parents', None)
             file = drive_service.files().update(
                 fileId=file_id,
@@ -196,6 +201,7 @@ def upload_to_drive(drive_service, file_content, filename):
                 media_body=media
             ).execute()
         else:
+            # Create new file
             file = drive_service.files().create(
                 body=file_metadata,
                 media_body=media,
@@ -206,36 +212,39 @@ def upload_to_drive(drive_service, file_content, filename):
         
     except Exception as e:
         raise Exception(f"Error uploading to Drive: {str(e)}")
-
+    
 def process_kindle_emails():
-    """Process all unread Kindle emails."""
+    """Main function to process all unread Kindle emails."""
     try:
+        print("Starting Kindle email processor...")
+        
+        # Initialize services
         gmail_service, drive_service = get_services()
         
+        # Find all unread Kindle emails
         messages = find_kindle_emails(gmail_service)
         if not messages:
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'No unread Kindle emails found',
-                    'status': 'no_email',
-                    'timestamp': str(datetime.now())
-                })
-            }
+            print("No unread Kindle emails found")
+            return
         
         processed_files = []
         
+        # Process each email
         for message in messages:
             try:
                 msg_id = message['id']
                 filename, html_body = extract_email_data(gmail_service, msg_id)
                 pdf_url = extract_pdf_url(html_body)
                 
+                # Download PDF
                 response = requests.get(pdf_url, timeout=30)
                 response.raise_for_status()
                 pdf_content = response.content
                 
+                # Upload to Drive
                 file_id = upload_to_drive(drive_service, pdf_content, filename)
+                
+                # Mark email as read
                 mark_as_read(gmail_service, msg_id)
                 
                 processed_files.append({
@@ -244,44 +253,22 @@ def process_kindle_emails():
                     'status': 'success'
                 })
                 
+                print(f"Processed: {filename}.pdf")
+                
             except Exception as e:
                 processed_files.append({
                     'message_id': msg_id,
                     'error': str(e),
                     'status': 'error'
                 })
+                print(f"Error processing email {msg_id}: {str(e)}")
         
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Processing complete',
-                'status': 'success',
-                'files_processed': processed_files,
-                'timestamp': str(datetime.now())
-            })
-        }
+        print(f"\nProcessing complete. {len(processed_files)} files processed.")
+        return processed_files
         
     except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'message': str(e),
-                'status': 'error',
-                'timestamp': str(datetime.now())
-            })
-        }
-
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        result = process_kindle_emails()
-        
-        self.send_response(result.get('statusCode', 500))
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        
-        response_body = result.get('body', json.dumps({'error': 'Unknown error'}))
-        self.wfile.write(response_body.encode())
-        return
+        print(f"Error: {str(e)}")
+        return None
 
 if __name__ == "__main__":
-    print(json.dumps(process_kindle_emails(), indent=2))
+    process_kindle_emails()
