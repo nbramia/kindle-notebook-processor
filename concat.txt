@@ -361,7 +361,15 @@ if __name__ == "__main__":
       "dest": "/api/distill_text.py"
     },
     {
-      "src": "/api/(.*)",
+      "src": "/api/index",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/(.*)",
       "dest": "/api/index.py"
     }
   ]
