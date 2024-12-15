@@ -194,8 +194,13 @@ def upload_to_drive(drive_service, file_content, filename):
         # If file exists, move it to Old folder with timestamp
         if response.get('files'):
             existing_file = response['files'][0]
-            # Get EST timestamp
-            est_time = datetime.now().astimezone(timezone('US/Eastern'))
+            try:
+                # Try to get EST timestamp
+                est_time = datetime.now().astimezone(timezone('US/Eastern'))
+            except:
+                # Fallback to UTC if timezone conversion fails
+                est_time = datetime.utcnow()
+            
             timestamp = est_time.strftime('%Y%m%d_%H%M%S')
             new_name = f"{filename}_{timestamp}.pdf"
             
