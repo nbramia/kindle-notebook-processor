@@ -1,0 +1,29 @@
+# Environment
+.env
+.env.*
+!.env.example
+venv/
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+
+# Vercel
+.vercel
+
+# Credentials
+*.pem
+*.key
+token.json
+credentials.json
+
+# Dev
+concat.sh
+concat.txt
+
+#  Backup
+repo-backup.bundle

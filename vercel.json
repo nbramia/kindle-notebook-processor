@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/distill_text",
+      "dest": "/api/distill_text.py"
+    },
+    {
+      "src": "/api/process_queued",
+      "dest": "/api/process_queued.py"
+    },
+    {
+      "src": "/api/save_processed",
+      "dest": "/api/save_processed.py"
+    },
+    {
+      "src": "/api/index",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.py"
+    }
+  ]
+}
