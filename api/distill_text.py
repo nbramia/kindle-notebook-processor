@@ -304,6 +304,7 @@ def process_text_files():
     try:
         drive_service = get_services()
         txt_files, main_folder_id = list_txt_files(drive_service)
+        total_files = len(txt_files)
 
         if not txt_files:
             return {
@@ -311,11 +312,12 @@ def process_text_files():
                 'body': json.dumps({
                     'message': 'No new text files found',
                     'status': 'no_text_files',
+                    'total_files': 0,
                     'timestamp': str(datetime.now())
                 })
             }
 
-        # Process the first/next file
+        # Process only the first file
         f = txt_files[0]
         file_id = f['id']
         filename = f['name']
@@ -326,34 +328,37 @@ def process_text_files():
         md_file_id = upload_markdown(drive_service, base_name, md_content)
         move_original_file(drive_service, file_id, filename, main_folder_id)
 
-        remaining = len(txt_files) - 1
-        if remaining > 0:
-            return {
-                'statusCode': 307,  # Temporary Redirect - indicates more work to do, in case there are more files to process
-                'body': json.dumps({
-                    'message': f'More files to process: {remaining} remaining',
-                    'status': 'pending',
-                    'processed': {
-                        'original_txt': filename,
-                        'md_file_id': md_file_id,
-                        'status': 'success'
-                    },
-                    'remaining_files': remaining,
-                    'timestamp': str(datetime.now())
-                })
-            }
+        # SAVING OLD CODE FOR FUTURE REFERENCE in case we want to go back to an older version
+        # remaining = len(txt_files) - 1
+        # if remaining > 0:
+        #     return {
+        #         'statusCode': 307,  # Temporary Redirect - indicates more work to do, in case there are more files to process
+        #         'body': json.dumps({
+        #             'message': f'More files to process: {remaining} remaining',
+        #             'status': 'pending',
+        #             'processed': {
+        #                 'original_txt': filename,
+        #                 'md_file_id': md_file_id,
+        #                 'status': 'success'
+        #             },
+        #             'remaining_files': remaining,
+        #             'timestamp': str(datetime.now())
+        #         })
+        #     }
 
+        remaining = total_files - 1
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'All text files processed',
+                'message': 'File processed successfully',
                 'status': 'success',
                 'processed': {
                     'original_txt': filename,
                     'md_file_id': md_file_id,
                     'status': 'success'
                 },
-                'remaining_files': 0,
+                'remaining_files': remaining,
+                'total_files': total_files,
                 'timestamp': str(datetime.now())
             })
         }

@@ -1,0 +1,78 @@
+name: Process Kindle Notes
+
+on:
+  workflow_dispatch:  # Allows manual trigger if needed
+  schedule:
+    - cron: '*/10 * * * *'  # Every 10 minutes, will coordinate with job-level timing
+
+jobs:
+  process-emails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Process Kindle Emails
+        run: |
+          # Wait until we're at the start of a 10-minute interval
+          sleep $(( 60 - $(date +%s) % 60 ))
+          
+          echo "Processing Kindle emails..."
+          response=$(curl -s -m 30 -w "\n%{http_code}" "https://kindle-notebook-download.vercel.app/api/index")
+          status_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | head -n-1)
+          
+          if [ "$status_code" = "200" ]; then
+            echo "Email processing complete: $body"
+          else
+            echo "Error processing emails: $body"
+            exit 1
+          fi
+
+  process-text:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Process Text Files
+        run: |
+          # Wait until we're 1 minute past a 10-minute interval
+          sleep $(( 60 - $(date +%s) % 60 + 60 ))
+          
+          echo "Processing text files..."
+          # First call to check how many files we need to process
+          response=$(curl -s -m 60 -w "\n%{http_code}" "https://kindle-notebook-download.vercel.app/api/distill_text")
+          status_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | head -n-1)
+          
+          if [ "$status_code" = "200" ]; then
+            # Extract total_files from the JSON response
+            total_files=$(echo "$body" | jq -r '.total_files // 0')
+            remaining_files=$(echo "$body" | jq -r '.remaining_files // 0')
+            
+            if [ "$total_files" -eq 0 ]; then
+              echo "No files to process"
+              exit 0
+            fi
+            
+            echo "Processed 1 of $total_files files"
+            
+            # If we have more files, process them one per minute
+            for i in $(seq 2 $total_files); do
+              echo "Waiting 60 seconds before processing next file..."
+              sleep 60
+              
+              response=$(curl -s -m 60 -w "\n%{http_code}" "https://kindle-notebook-download.vercel.app/api/distill_text")
+              status_code=$(echo "$response" | tail -n1)
+              body=$(echo "$response" | head -n-1)
+              
+              if [ "$status_code" = "200" ]; then
+                echo "Processed $i of $total_files files"
+              else
+                echo "Error processing file $i: $body"
+                exit 1
+              fi
+            done
+            
+            echo "All files processed successfully"
+          elif [ "$status_code" = "504" ]; then
+            echo "Timeout occurred. Will retry in next interval."
+          else
+            echo "Error processing files: $body"
+            exit 1
+          fi
