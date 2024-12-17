@@ -15,7 +15,7 @@ jobs:
           sleep $(( 60 - $(date +%s) % 60 ))
           
           echo "Processing Kindle emails..."
-          response=$(curl -s -m 30 -w "\n%{http_code}" "https://kindle-notebook-download.vercel.app/api/index")
+          response=$(curl -s -m 30 -w "\n%{http_code}" "https://${{ secrets.VERCEL_URL }}/api/index")
           status_code=$(echo "$response" | tail -n1)
           body=$(echo "$response" | head -n-1)
           
@@ -35,8 +35,7 @@ jobs:
           sleep $(( 60 - $(date +%s) % 60 + 60 ))
           
           echo "Processing text files..."
-          # First call to check how many files we need to process
-          response=$(curl -s -m 60 -w "\n%{http_code}" "https://kindle-notebook-download.vercel.app/api/distill_text")
+          response=$(curl -s -m 60 -w "\n%{http_code}" "https://${{ secrets.VERCEL_URL }}/api/distill_text")
           status_code=$(echo "$response" | tail -n1)
           body=$(echo "$response" | head -n-1)
           
@@ -57,7 +56,7 @@ jobs:
               echo "Waiting 60 seconds before processing next file..."
               sleep 60
               
-              response=$(curl -s -m 60 -w "\n%{http_code}" "https://kindle-notebook-download.vercel.app/api/distill_text")
+              response=$(curl -s -m 60 -w "\n%{http_code}" "https://${{ secrets.VERCEL_URL }}/api/distill_text")
               status_code=$(echo "$response" | tail -n1)
               body=$(echo "$response" | head -n-1)
               

@@ -1,4 +1,15 @@
 # api/index.py
+#
+# This script processes emails from Kindle Scribe notebooks:
+# 1. Finds unread emails from Kindle in Gmail
+# 2. Downloads attached PDF and TXT files
+# 3. Saves files to "Kindle Notebooks" folder in Google Drive
+# 4. Archives the processed emails
+# 5. Returns processing status and file IDs
+#
+# The script is designed to be called via Vercel's serverless functions
+# and is triggered by GitHub Actions every 10 minutes.
+
 import os
 import json
 import re
@@ -16,13 +27,25 @@ from pytz import timezone
 from google.auth.transport.requests import Request
 
 SCOPES = [
-    'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/drive.file'
+    'https://www.googleapis.com/auth/gmail.readonly',  # Read Gmail messages
+    'https://www.googleapis.com/auth/gmail.modify',    # Archive emails
+    'https://www.googleapis.com/auth/drive.file'      # Create/update Drive files
 ]
 
 def get_services():
-    """Initialize Gmail and Drive services using environment credentials."""
+    """Initialize Gmail and Drive services using environment credentials.
+    
+    Uses GMAIL_TOKEN from environment variables, which should contain
+    a JSON string with OAuth credentials. The token can be generated
+    using gmail_token_generator.py.
+    
+    Returns:
+        tuple: (gmail_service, drive_service) authenticated service objects
+    
+    Raises:
+        ValueError: If GMAIL_TOKEN is missing or invalid
+        Exception: For other initialization errors
+    """
     try:
         token_json = os.environ.get('GMAIL_TOKEN')
         if not token_json:
@@ -47,7 +70,20 @@ def get_services():
         raise Exception(f"Failed to initialize services: {str(e)}")
         
 def find_kindle_emails(service):
-    """Find all unread Kindle emails matching our pattern."""
+    """Find all unread Kindle emails matching our pattern.
+    
+    Searches Gmail for unread emails with specific subject line patterns
+    that indicate they're from Kindle Scribe's "Convert to text and email" feature.
+    
+    Args:
+        service: Authenticated Gmail service object
+    
+    Returns:
+        list: Message objects containing IDs of matching emails
+        
+    Raises:
+        Exception: If Gmail API query fails
+    """
     try:
         query = 'subject:"you sent a file" "from your kindle" is:unread'
         result = service.users().messages().list(userId='me', q=query).execute()
@@ -68,7 +104,25 @@ def mark_as_read_and_archive(service, msg_id):
         raise Exception(f"Error marking email as read and archived: {str(e)}")
 
 def extract_email_data(service, msg_id):
-    """Extract subject, filename, and HTML body from the email."""
+    """Extract subject, filename, and HTML body from the email.
+    
+    Retrieves full email content and parses:
+    - Subject line to get original notebook filename
+    - HTML body containing download links
+    
+    Args:
+        service: Authenticated Gmail service
+        msg_id: Email message ID to process
+    
+    Returns:
+        tuple: (filename, html_body)
+        - filename: Original notebook name from subject
+        - html_body: Decoded HTML content with download links
+        
+    Raises:
+        ValueError: If email lacks required content
+        Exception: For API or parsing errors
+    """
     try:
         email_data = service.users().messages().get(
             userId='me', id=msg_id, format='full').execute()
@@ -96,7 +150,25 @@ def extract_email_data(service, msg_id):
         raise Exception(f"Error extracting email data: {str(e)}")
 
 def extract_file_urls(html_body):
-    """Extract PDF and text file download links using multiple methods."""
+    """Extract PDF and text file download links from email HTML.
+    
+    Parses HTML to find download links for:
+    1. PDF version of notebook (required)
+    2. Text version of notebook (optional)
+    
+    Handles both direct links and Amazon's redirect URLs.
+    
+    Args:
+        html_body: Raw HTML content from email
+        
+    Returns:
+        tuple: (pdf_url, txt_url)
+        - pdf_url: Direct download URL for PDF
+        - txt_url: Direct download URL for text file, or None
+        
+    Raises:
+        ValueError: If PDF link not found
+    """
     if not html_body:
         raise ValueError("No HTML content in the email.")
     
@@ -136,7 +208,24 @@ def extract_file_urls(html_body):
     return pdf_url, txt_url
 
 def get_or_create_folder(drive_service, folder_name, parent_id=None):
-    """Get or create a folder in Google Drive, optionally within a parent folder."""
+    """Get or create a folder in Google Drive, optionally within a parent folder.
+    
+    This function:
+    1. Searches for existing folder by name
+    2. Creates new folder if none exists
+    3. Handles nested folders via parent_id
+    
+    Args:
+        drive_service: Authenticated Google Drive service
+        folder_name: Name of folder to find/create
+        parent_id: Optional ID of parent folder for nesting
+    
+    Returns:
+        str: ID of existing or newly created folder
+        
+    Raises:
+        Exception: If folder operations fail
+    """
     try:
         # Build query to find existing folder
         query = f"mimeType='application/vnd.google-apps.folder' and trashed=false"
@@ -172,7 +261,28 @@ def get_or_create_folder(drive_service, folder_name, parent_id=None):
         raise Exception(f"Error handling folder: {str(e)}")
 
 def upload_to_drive(drive_service, file_content, filename, file_type='pdf'):
-    """Upload file to Google Drive, moving existing files to an 'Old' subfolder with timestamp."""
+    """Upload file to Google Drive, moving existing files to an 'Old' subfolder.
+    
+    This function:
+    1. Gets/creates main "Kindle Notebooks" folder
+    2. Gets/creates "Old" subfolder for archiving
+    3. If file exists with same name:
+       - Moves existing file to Old folder
+       - Adds timestamp to filename
+    4. Uploads new file to main folder
+    
+    Args:
+        drive_service: Authenticated Drive service
+        file_content: Binary content of file to upload
+        filename: Base name for the file (without extension)
+        file_type: Either 'pdf' or 'txt' (default: 'pdf')
+    
+    Returns:
+        str: ID of newly uploaded file
+        
+    Raises:
+        Exception: If upload or file operations fail
+    """
     try:
         # Get or create main folder
         main_folder_id = get_or_create_folder(drive_service, "Kindle Notebooks")
@@ -241,7 +351,33 @@ def upload_to_drive(drive_service, file_content, filename, file_type='pdf'):
         raise Exception(f"Error uploading to Drive: {str(e)}")
 
 def process_kindle_emails():
-    """Process all unread Kindle emails."""
+    """Process all unread Kindle emails and their attachments.
+    
+    Main processing flow:
+    1. Initialize Gmail and Drive services
+    2. Find unread Kindle emails
+    3. For each email:
+       - Extract filename and download links
+       - Download PDF and TXT attachments
+       - Upload files to Google Drive
+       - Archive the email
+    4. Track processing status and errors
+    
+    Performance notes:
+    - Logs timing information for debugging
+    - Skips duplicate filenames in same batch
+    - Processes all files from an email before moving to next
+    
+    Returns:
+        dict: Response with:
+            - statusCode: 200 for success, 500 for errors
+            - body: JSON with processing details:
+                - message: Status description
+                - status: 'success', 'no_email', or 'error'
+                - files_processed: List of processed files
+                - processing_time: Total execution time
+                - timestamp: Processing completion time
+    """
     try:
         start_time = datetime.now()
         print(f"Starting process at {start_time}")
@@ -335,7 +471,26 @@ def process_kindle_emails():
         }
 
 class handler(BaseHTTPRequestHandler):
+    """HTTP request handler for Vercel serverless function.
+    
+    Handles GET requests to process Kindle emails:
+    1. Calls process_kindle_emails()
+    2. Returns JSON response with processing results
+    3. Sets appropriate HTTP status code
+    
+    Note: This handler is specifically for Vercel's serverless
+    environment and follows their expected response format.
+    """
+    
     def do_GET(self):
+        """Handle GET requests to process Kindle emails.
+        
+        Returns:
+            HTTP Response with:
+            - Status code (200/500)
+            - JSON content type
+            - Processing results in response body
+        """
         result = process_kindle_emails()
         
         self.send_response(result.get('statusCode', 500))

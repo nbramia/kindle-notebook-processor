@@ -1,8 +1,26 @@
-*.pyc
-__pycache__/
+# Environment
 .env
-.vercel
+.env.*
+!.env.example
 venv/
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+
+# Vercel
+.vercel
+
+# Credentials
+*.pem
+*.key
 token.json
 credentials.json
-gmail_token_generator.py
+
+# Dev
+concat.sh
+concat.txt
