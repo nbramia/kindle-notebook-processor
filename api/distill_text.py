@@ -9,6 +9,7 @@ from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from io import BytesIO
 from http.server import BaseHTTPRequestHandler
 from pytz import timezone
+import time
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -98,29 +99,101 @@ def download_file_content(drive_service, file_id):
     fh.seek(0)
     return fh.read().decode('utf-8', errors='replace')
 
-def call_openai_api(text):
+def get_prompt_from_drive(drive_service):
+    """Get the prompt instructions from a markdown file in Drive."""
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    main_folder_id = get_or_create_folder(drive_service, "Kindle Notebooks")
+    
+    # Look for the prompt file
+    query = f"name='prompt_instructions.md' and '{main_folder_id}' in parents and trashed=false"
+    response = drive_service.files().list(
+        q=query,
+        spaces='drive',
+        fields='files(id, name)'
+    ).execute()
+
+    # If prompt file doesn't exist, create it with default instructions
+    if not response.get('files'):
+        default_prompt = (
+            "You are a helpful assistant. Given the following text, please:\n"
+            "1. Summarize the text. Make it concise and actionable. Ensure you do not speculate. If there isn't enough information for you to understand what something means, don't guess.\n"
+            "2. Include the date in the summary, if found in the notes. Use bullet points and extremely concise language in the Summary section - no fluff, no extra words. Less than 100 words.\n"
+            "3. Extract any action items or to-dos. Only include items that are specifically called out directly as followups - don't include items that are only indirectly implied, and don't try too hard to infer. If you find no action items, say 'No action items found'.\n"
+            "4. The 'Notes' section should be exactly equivalent to ALL of the original text you were sent to process. However, you may try to correct errors in OCR - don't get creative, but if you see a word that almost certainly should have been something else given the context, you may correct it.\n"
+            "5. The 'Insights' section is optional. IF you have any key insights, links to relevant articles, or other information that would likely be useful to the person who took these notes, you may include this section.\n"
+            "Output the result in Markdown format, leveraging # to create section headers, hyphens followed by a space to create bullets, '- [ ]' to create checkboxes, and numerical lists. Do not start and end the .md file with '```' - simply display the formatted text itself. No tick marks. I'm going to open the resulting file in a markdown editor like Obsidian and I want it to be formatted nicely. Organize into following sections:\n"
+            "### Summary\n\n"
+            "### Action Items\n\n"
+            "### Notes\n\n"
+            "### Insights\n\n"
+        )
+        
+        file_metadata = {
+            'name': 'prompt_instructions.md',
+            'parents': [main_folder_id]
+        }
+        media = MediaIoBaseUpload(
+            BytesIO(default_prompt.encode('utf-8')),
+            mimetype='text/markdown',
+            resumable=True
+        )
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+
+        # Add retry logic for reading the newly created file
+        for attempt in range(max_retries):
+            try:
+                time.sleep(retry_delay)  # Wait before trying to read
+                response = drive_service.files().list(
+                    q=query,
+                    spaces='drive',
+                    fields='files(id, name)'
+                ).execute()
+                if response.get('files'):
+                    break
+            except Exception as e:
+                if attempt == max_retries - 1:  # If last attempt
+                    print(f"Unable to verify file creation after {max_retries} attempts. Using default prompt.")
+                    return default_prompt
+                continue
+
+    # If prompt file exists, read its content with retry logic
+    file_id = response['files'][0]['id']
+    for attempt in range(max_retries):
+        try:
+            request = drive_service.files().get_media(fileId=file_id)
+            fh = BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            fh.seek(0)
+            return fh.read().decode('utf-8')
+        except Exception as e:
+            if attempt == max_retries - 1:  # If last attempt
+                raise Exception(f"Failed to read prompt file after {max_retries} attempts: {str(e)}")
+            time.sleep(retry_delay)
+            continue
+
+def call_openai_api(text, drive_service):
     """Call OpenAI with the text to get summary and action items."""
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable not set.")
     
     client = OpenAI(api_key=api_key)
-
-    prompt = (
-        "You are a helpful assistant. Given the following text, please:\n"
-        "1. Extract any action items or to-dos. Only include items that are specifically called out directly as followups - don't include items that are only indirectly implied, and don't try too hard to infer.\n"
-        "2. Summarize the text. Make it concise and actionable. Ensure you do not speculate. If there isn't enough information for you to understand what something means, don't guess.\n"
-        "3. Include the date in the summary, if found in the notes.\n"
-        "Output the result in Markdown format with the following sections:\n"
-        "### Summary\n\n"
-        "### Action Items\n\n"
-        "### Notes\n\n"
-        "The 'Notes' section should be exactly equivalent to ALL of the original text you were sent to process. However, you may try to correct errors in OCR - don't get creative, but if you see a word that almost certainly should have been something else given the context, you maycorrect it.\n\n"
-        "Text to process:\n" + text
-    )
+    
+    # Get prompt from Drive
+    prompt = get_prompt_from_drive(drive_service)
+    prompt += "\n\nText to process:\n" + text
 
     response = client.chat.completions.create(
-        model="gpt-4o",  # or "gpt-4-turbo-preview" for the latest version
+        model="gpt-4o",
         messages=[
             {
                 "role": "system", 
@@ -248,7 +321,7 @@ def process_text_files():
         filename = f['name']
         
         text_content = download_file_content(drive_service, file_id)
-        md_content = call_openai_api(text_content)
+        md_content = call_openai_api(text_content, drive_service)
         base_name = re.sub(r'\.txt$', '', filename, flags=re.IGNORECASE)
         md_file_id = upload_markdown(drive_service, base_name, md_content)
         move_original_file(drive_service, file_id, filename, main_folder_id)

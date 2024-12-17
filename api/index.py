@@ -56,16 +56,16 @@ def find_kindle_emails(service):
     except Exception as e:
         raise Exception(f"Error finding Kindle emails: {str(e)}")
 
-def mark_as_read(service, msg_id):
-    """Mark an email as read by removing UNREAD label."""
+def mark_as_read_and_archive(service, msg_id):
+    """Mark an email as read and archive it by removing UNREAD and INBOX labels."""
     try:
         service.users().messages().modify(
             userId='me',
             id=msg_id,
-            body={'removeLabelIds': ['UNREAD']}
+            body={'removeLabelIds': ['UNREAD', 'INBOX']}
         ).execute()
     except Exception as e:
-        raise Exception(f"Error marking email as read: {str(e)}")
+        raise Exception(f"Error marking email as read and archived: {str(e)}")
 
 def extract_email_data(service, msg_id):
     """Extract subject, filename, and HTML body from the email."""
@@ -277,7 +277,7 @@ def process_kindle_emails():
                     continue
                     
                 processed_filenames.add(filename)
-                mark_as_read(gmail_service, msg_id)
+                mark_as_read_and_archive(gmail_service, msg_id)
                 pdf_url, txt_url = extract_file_urls(html_body)
                 
                 print(f"Downloading PDF for {filename} at {datetime.now() - start_time}")
