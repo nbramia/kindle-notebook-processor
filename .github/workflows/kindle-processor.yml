@@ -64,15 +64,17 @@ jobs:
               if [ "$status_code" = "200" ]; then
                 echo "Processed $i of $total_files files"
               else
-                echo "Error processing file $i: $body"
-                exit 1
+                echo "Error processing file $i. Will retry in next interval."
+                # Don't exit with error - let the next interval handle it
+                exit 0
               fi
             done
             
             echo "All files processed successfully"
-          elif [ "$status_code" = "504" ]; then
-            echo "Timeout occurred. Will retry in next interval."
+          elif [ "$status_code" = "504" ] || [ "$status_code" = "500" ]; then
+            echo "Timeout or error occurred. Will retry in next interval."
+            exit 0  # Exit cleanly to let next interval try again
           else
-            echo "Error processing files: $body"
+            echo "Unexpected error processing files: $body"
             exit 1
           fi
