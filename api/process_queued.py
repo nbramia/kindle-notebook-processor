@@ -27,8 +27,15 @@ class handler(BaseHTTPRequestHandler):
             
             # Process with OpenAI
             print("Processing with OpenAI")
-            md_content = call_openai_api(content, drive_service)
-            
+            try:
+                # Clean the content before sending to OpenAI
+                cleaned_content = content.encode('utf-8', errors='replace').decode('utf-8')
+                md_content = call_openai_api(cleaned_content, drive_service)
+            except Exception as e:
+                print(f"OpenAI processing error: {str(e)}")
+                self.send_error_response(f"OpenAI processing failed: {str(e)}")
+                return
+                
             # Store result in temp folder
             print("Storing processed result")
             result_id = store_for_processing(drive_service, md_content, f'result_{temp_id}')

@@ -19,12 +19,16 @@ def store_for_processing(drive_service, content, filename):
     try:
         temp_folder = get_temp_folder(drive_service)
         
+        # Ensure content is properly encoded
+        if isinstance(content, str):
+            content = content.encode('utf-8', errors='replace')
+        
         file_metadata = {
             'name': f'temp_{filename}',
             'parents': [temp_folder]
         }
         media = MediaIoBaseUpload(
-            BytesIO(content.encode('utf-8')),
+            BytesIO(content if isinstance(content, bytes) else content.encode('utf-8', errors='replace')),
             mimetype='text/plain',
             resumable=True
         )
